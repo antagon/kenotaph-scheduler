@@ -1,0 +1,3 @@
+- When directory is passed to libconfig, it fails with noninformative error
+  message: "input in flex scanner failed".
+

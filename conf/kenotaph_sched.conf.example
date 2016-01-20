@@ -1,0 +1,21 @@
+test_server1: {
+	hostname = "localhost";
+	port = "8888";
+
+	test_filter: {
+		on_begin = "/bin/true"; // optional
+		on_error = ""; // optional
+		on_end = "/bin/true"; // optional
+		noexec_on = (
+			[ "monday", "00:00", "08:00" ],
+			[ "monday", "19:00", "24:00" ]
+		);
+	}
+}
+
+test_server2: {
+	hostname = "localhost";
+	port = "9999";
+}
+
+
