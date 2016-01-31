@@ -20,8 +20,9 @@
 #include "config.h"
 #include "pathname.h"
 #include "session_data.h"
+#include "nmsg_queue.h"
 
-static const unsigned int TIMER_INTERVAL = 10;
+static const unsigned int RECONNECT_INTERVAL = 30;
 static const unsigned int SELECT_TIMEOUT_MS = -1;
 static const unsigned int LISTEN_QUEUE_LEN = 8;
 
@@ -52,14 +53,14 @@ kenotaphsched_version (const char *p)
 }
 
 static void
-kenotaphd_sigdie (int signo)
+kenotaphsched_sigdie (int signo)
 {
 	main_loop = 0;
 	exitno = signo;
 }
 
 static void
-kenotaphd_sigalarm (int signo)
+kenotaphsched_sigalarm (int signo)
 {
 	reconnect = 1;
 }
@@ -73,6 +74,8 @@ main (int argc, char *argv[])
 	struct config kenotaphsched_conf;
 	struct config_server *server_iter;
 	struct session_data *server_session;
+	struct nmsg_queue nmsg_que;
+	struct nmsg_node *nmsg_node;
 	struct pathname path_config;
 	struct option_data opt;
 	char conf_errbuff[CONF_ERRBUF_SIZE];
@@ -97,6 +100,7 @@ main (int argc, char *argv[])
 	memset (&path_config, 0, sizeof (struct pathname));
 	memset (&kenotaphsched_conf, 0, sizeof (struct config));
 	memset (&addr_hint, 0, sizeof (struct addrinfo));
+	memset (&nmsg_que, 0, sizeof (struct nmsg_queue));
 
 	addr_hint.ai_family = AF_UNSPEC;
 	addr_hint.ai_socktype = SOCK_STREAM;
@@ -104,9 +108,9 @@ main (int argc, char *argv[])
 
 	memset (&timer, 0, sizeof (struct itimerval));
 
-	timer.it_interval.tv_sec = TIMER_INTERVAL;
+	timer.it_interval.tv_sec = RECONNECT_INTERVAL;
 	timer.it_interval.tv_usec = 0;
-	timer.it_value.tv_sec = TIMER_INTERVAL;
+	timer.it_value.tv_sec = RECONNECT_INTERVAL;
 	timer.it_value.tv_usec = 0;
 
 	while ( (c = getopt_long (argc, argv, "dhv", opt_long, &opt_index)) != -1 ){
@@ -234,7 +238,7 @@ main (int argc, char *argv[])
 	//
 	// Setup signal handler
 	//
-	sa.sa_handler = kenotaphd_sigdie;
+	sa.sa_handler = kenotaphsched_sigdie;
 	sigemptyset (&(sa.sa_mask));
 	sa.sa_flags = 0;
 
@@ -243,7 +247,7 @@ main (int argc, char *argv[])
 	rval &= sigaction (SIGQUIT, &sa, NULL);
 	rval &= sigaction (SIGTERM, &sa, NULL);
 
-	sa.sa_handler = kenotaphd_sigalarm;
+	sa.sa_handler = kenotaphsched_sigalarm;
 	sigemptyset (&(sa.sa_mask));
 	sa.sa_flags = 0;
 
@@ -290,7 +294,7 @@ main (int argc, char *argv[])
 		syslog_flags = LOG_PID;
 	}
 
-	openlog ("kenotaph_sched", syslog_flags, LOG_DAEMON);
+	openlog ("kenotaphsched", syslog_flags, LOG_DAEMON);
 
 	syslog (LOG_INFO, "kenotaph-scheduler started");
 
@@ -369,6 +373,7 @@ main (int argc, char *argv[])
 		}
 
 		for ( i = 0; i < server_cnt; i++ ){
+
 			if ( poll_fd[i].revents & POLLOUT ){
 				opt_val = -1;
 				opt_len = sizeof (opt_val);
@@ -396,33 +401,44 @@ main (int argc, char *argv[])
 					poll_fd[i].fd = server_session[i].fd;
 					poll_fd[i].events = 0;
 					poll_fd[i].revents = 0;
+					continue;
 				}
 			}
 
 			// Handle incoming data (event).
 			if ( poll_fd[i].revents & POLLIN ){
-				char msg[CONF_FILTER_NAME_MAXLEN + 5];
+				char nmsg_buff[8192];
+				ssize_t nmsg_len;
 
-				rval = recv (server_session[i].fd, msg, sizeof (msg), MSG_DONTWAIT);
+				errno = 0;
+				nmsg_len = recv (server_session[i].fd, nmsg_buff, sizeof (nmsg_buff), MSG_DONTWAIT);
 
-				if ( rval <= 0 ){
-					syslog (LOG_WARNING, "disconnected from %s (%s:%s): %s", server_session[i].server_name, server_session[i].server_host, server_session[i].server_port, strerror (errno));
+				if ( nmsg_len <= 0 ){
+					syslog (LOG_WARNING, "disconnected from %s (%s:%s)", server_session[i].server_name, server_session[i].server_host, server_session[i].server_port);
 
 					close (server_session[i].fd);
 					server_session[i].fd = -1;
 					poll_fd[i].fd = server_session[i].fd;
 					poll_fd[i].events = 0;
+					continue;
 				}
-			}
 
-			/*if ( poll_fd[i].revents & POLLERR || poll_fd[i].revents & POLLHUP ){
-				fprintf (stderr, "err..\n");
-				close (server_session[i].fd);
-				server_session[i].fd = -1;
-				poll_fd[i].fd = server_session[i].fd;
-				poll_fd[i].events = 0;
-				poll_fd[i].revents = 0;
-			}*/
+				fprintf (stderr, "received: %lu B\n", nmsg_len);
+
+				rval = nmsg_queue_unserialize (&nmsg_que, nmsg_buff, nmsg_len);
+
+				if ( rval == -1 ){
+					fprintf (stderr, "%s: cannot allocate memory: %s\n", argv[0], strerror (errno));
+					exitno = EXIT_FAILURE;
+					goto cleanup;
+				}
+
+				for ( nmsg_node = nmsg_que.head; nmsg_node != NULL; nmsg_node = nmsg_node->next ){
+					fprintf (stderr, "%s:%s%c", nmsg_node->id, nmsg_node->type, '\n');
+				}
+
+				nmsg_queue_free (&nmsg_que);
+			}
 		}
 	}
 
