@@ -76,6 +76,7 @@ main (int argc, char *argv[])
 	struct session_data *server_session;
 	struct nmsg_queue nmsg_que;
 	struct nmsg_node *nmsg_node;
+	struct nmsg_text nmsg_text;
 	struct pathname path_config;
 	struct option_data opt;
 	char conf_errbuff[CONF_ERRBUF_SIZE];
@@ -433,11 +434,25 @@ main (int argc, char *argv[])
 					goto cleanup;
 				}
 
-				for ( nmsg_node = nmsg_que.head; nmsg_node != NULL; nmsg_node = nmsg_node->next ){
-					fprintf (stderr, "%s:%s%c", nmsg_node->id, nmsg_node->type, '\n');
-				}
+				nmsg_node = nmsg_que.head;
 
-				nmsg_queue_free (&nmsg_que);
+				while ( nmsg_node != NULL ){
+					struct nmsg_node *nmsg_node_next;
+
+					rval = nmsg_node_text (nmsg_node, &nmsg_text);
+
+					if ( rval == NMSG_ECON ){
+						fprintf (stderr, "[!!! incomplete message %s !!!]\n", nmsg_node->msg);
+						nmsg_node = nmsg_node->next;
+						continue;
+					}
+
+					fprintf (stderr, "%s:%s\n", nmsg_text.id, nmsg_text.type);
+
+					nmsg_node_next = nmsg_node->next;
+					nmsg_queue_delete (&nmsg_que, nmsg_node);
+					nmsg_node = nmsg_node_next;
+				}
 			}
 		}
 	}
@@ -452,6 +467,8 @@ cleanup:
 			session_data_free (&(server_session[i]));
 		free (server_session);
 	}
+
+	nmsg_queue_free (&nmsg_que);
 
 	if ( poll_fd != NULL )
 		free (poll_fd);
