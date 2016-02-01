@@ -33,6 +33,7 @@ struct nmsg_node
 
 struct nmsg_queue
 {
+	struct nmsg_node *st_node;
 	struct nmsg_node *head;
 	struct nmsg_node *tail;
 	size_t len;

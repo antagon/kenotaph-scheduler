@@ -103,10 +103,10 @@ nmsg_queue_serialize (struct nmsg_queue *res, char **buff)
 ssize_t
 nmsg_queue_unserialize (struct nmsg_queue *res, const char *buff, size_t buff_len)
 {
-	static struct nmsg_node *node = NULL;
+	struct nmsg_node *node = NULL;
 	size_t i;
 
-	//node = NULL;
+	node = res->st_node;
 
 	for ( i = 0; i < buff_len; i++ ){
 
@@ -131,6 +131,8 @@ nmsg_queue_unserialize (struct nmsg_queue *res, const char *buff, size_t buff_le
 			continue;
 		}
 	}
+
+	res->st_node = node;
 
 	return i;
 }
