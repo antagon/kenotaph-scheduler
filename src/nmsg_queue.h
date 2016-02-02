@@ -18,7 +18,8 @@ enum
 {
 	NMSG_EOK = 0,
 	NMSG_ECON = 1,
-	NMSG_ESYN = 2
+	NMSG_ESYN = 2,
+	NMSG_ECHR = 3
 };
 
 struct nmsg_text
@@ -53,7 +54,7 @@ extern ssize_t nmsg_queue_serialize (struct nmsg_queue *res, char **buff);
 
 extern ssize_t nmsg_queue_unserialize (struct nmsg_queue *res, const char *buff, size_t buff_len);
 
-extern void nmsg_queue_delete (struct nmsg_queue *res, struct nmsg_node *node);
+extern void nmsg_queue_delete (struct nmsg_queue *res, struct nmsg_node **node);
 
 extern void nmsg_queue_free (struct nmsg_queue *res);
 

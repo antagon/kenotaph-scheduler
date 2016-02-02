@@ -40,8 +40,6 @@ nmsg_node_text (const struct nmsg_node *node, struct nmsg_text *msg_text)
 	state = NMSG_ECON;
 	syntax = NMSG_ESYN;
 
-	// TODO: handle syntax errors!!!
-
 	memset (msg_text, 0, sizeof (struct nmsg_text));
 
 	for ( i = 0; i < node->len; i++ ){
@@ -143,20 +141,18 @@ nmsg_queue_unserialize (struct nmsg_queue *res, const char *buff, size_t buff_le
 		}
 	}
 
-	//res->st_node = node;
-
 	return i;
 }
 
 void
-nmsg_queue_delete (struct nmsg_queue *res, struct nmsg_node *node)
+nmsg_queue_delete (struct nmsg_queue *res, struct nmsg_node **node)
 {
 	struct nmsg_node *prev_node, *next_node;
 
-	prev_node = node->prev;
-	next_node = node->next;
+	prev_node = (*node)->prev;
+	next_node = (*node)->next;
 
-	free (node);
+	free (*node);
 
 	if ( prev_node == NULL )
 		res->head = next_node;
@@ -168,8 +164,10 @@ nmsg_queue_delete (struct nmsg_queue *res, struct nmsg_node *node)
 	else
 		next_node->prev = prev_node;
 
-	if ( node == res->st_node )
+	if ( *node == res->st_node )
 		res->st_node = NULL;
+
+	*node = next_node;
 }
 
 void
