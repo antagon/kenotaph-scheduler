@@ -19,7 +19,7 @@ nmsg_node_new (const struct nmsg_text *msg_text)
 
 	memset (node, 0, sizeof (struct nmsg_node));
 
-	snprintf (node->msg, sizeof (node->msg), "%s:%s\n", msg_text->id, msg_text->type);
+	snprintf (node->msg, sizeof (node->msg), "%s%c%s%c", msg_text->id, NMSG_FLDDELIM, msg_text->type, NMSG_MSGDELIM);
 
 	node->len = strlen (msg_text->id) + 1 + strlen (msg_text->type) + 1;
 
@@ -31,29 +31,36 @@ nmsg_node_text (const struct nmsg_node *node, struct nmsg_text *msg_text)
 {
 	char *node_buff;
 	size_t i, len, maxlen;
-	int state;
+	int state, syntax;
 
 	len = 0;
 	maxlen = NMSG_ID_MAXLEN;
 	node_buff = msg_text->id;
+
 	state = NMSG_ECON;
+	syntax = NMSG_ESYN;
+
+	// TODO: handle syntax errors!!!
 
 	memset (msg_text, 0, sizeof (struct nmsg_text));
 
 	for ( i = 0; i < node->len; i++ ){
 
-		if ( node->msg[i] == ':' ){
+		if ( node->msg[i] == NMSG_FLDDELIM ){
 			len = 0;
 			maxlen = NMSG_TYPE_MAXLEN;
 			node_buff = msg_text->type;
+			syntax = NMSG_ESYN;
 			continue;
-		} else if ( node->msg[i] == '\n' ){
-			state = NMSG_OK;
+		} else if ( node->msg[i] == NMSG_MSGDELIM ){
+			state = (syntax == NMSG_EOK)? NMSG_EOK:NMSG_ESYN;
 			break;
 		}
 
 		if ( len > maxlen )
 			continue;
+
+		syntax = NMSG_EOK;
 
 		node_buff[len++] = node->msg[i];
 	}
@@ -124,13 +131,13 @@ nmsg_queue_unserialize (struct nmsg_queue *res, const char *buff, size_t buff_le
 		// Check if we have reached end of nmsg message buffer, if so,
 		// terminate the message with newline character and exit.
 		if ( node->len == NMSG_MAXLEN ){
-			node->msg[node->len - 1] = '\n';
+			node->msg[node->len - 1] = NMSG_MSGDELIM;
 			break;
 		}
 
 		node->msg[node->len++] = buff[i];
 
-		if ( buff[i] == '\n' ){
+		if ( buff[i] == NMSG_MSGDELIM ){
 			node = NULL;
 			continue;
 		}

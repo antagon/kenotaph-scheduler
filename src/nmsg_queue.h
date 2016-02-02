@@ -4,6 +4,9 @@
 #ifndef _NMSG_QUEUE_H
 #define _NMSG_QUEUE_H
 
+#define NMSG_FLDDELIM	':'
+#define NMSG_MSGDELIM	'\n'
+
 enum
 {
 	NMSG_MAXLEN = 254,
@@ -13,8 +16,9 @@ enum
 
 enum
 {
-	NMSG_OK = 0,
-	NMSG_ECON = 1
+	NMSG_EOK = 0,
+	NMSG_ECON = 1,
+	NMSG_ESYN = 2
 };
 
 struct nmsg_text
