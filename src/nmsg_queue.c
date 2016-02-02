@@ -121,8 +121,12 @@ nmsg_queue_unserialize (struct nmsg_queue *res, const char *buff, size_t buff_le
 			nmsg_queue_push (res, node);
 		}
 
-		if ( node->len > NMSG_MAXLEN )
-			continue;
+		// Check if we have reached end of nmsg message buffer, if so,
+		// terminate the message with newline character and exit.
+		if ( node->len == NMSG_MAXLEN ){
+			node->msg[node->len - 1] = '\n';
+			break;
+		}
 
 		node->msg[node->len++] = buff[i];
 
