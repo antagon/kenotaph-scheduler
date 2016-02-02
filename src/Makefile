@@ -23,7 +23,7 @@ clean:
 
 $(NAME): main.o config.o config_filter.o config_server.o session_data.o pathname.o nmsg_queue.o
 #hostport_parser.o
-	$(CC) $(CFLAGS) $^ -o $(NAME) -lpcap -lconfig
+	$(CC) $(CFLAGS) $^ -o $(NAME) -lconfig
 
 main.o: main.c
 	$(CC) $(CFLAGS) -c $<
