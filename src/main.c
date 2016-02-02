@@ -424,8 +424,6 @@ main (int argc, char *argv[])
 					continue;
 				}
 
-				fprintf (stderr, "received: %lu B\n", nmsg_len);
-
 				rval = nmsg_queue_unserialize (&nmsg_que, nmsg_buff, nmsg_len);
 
 				if ( rval == -1 ){
@@ -437,21 +435,22 @@ main (int argc, char *argv[])
 				nmsg_node = nmsg_que.head;
 
 				while ( nmsg_node != NULL ){
-					struct nmsg_node *nmsg_node_next;
-
 					rval = nmsg_node_text (nmsg_node, &nmsg_text);
 
 					if ( rval == NMSG_ECON ){
-						fprintf (stderr, "[!!! incomplete message %s !!!]\n", nmsg_node->msg);
+						fprintf (stderr, "%lu B [!!! incomplete message !!!]\n", nmsg_len);
 						nmsg_node = nmsg_node->next;
 						continue;
+					} else if ( rval == NMSG_ESYN ){
+						fprintf (stderr, "%lu B [!!! syntax error !!!]\n", nmsg_len);
+					} else if ( rval == NMSG_ECHR ){
+						fprintf (stderr, "%lu B [!!! characters error !!!]\n", nmsg_len);
+					} else {
+						fprintf (stderr, "%s:%s\n", nmsg_text.id, nmsg_text.type);
+						//fprintf (stderr, "%lu B [ complete message ]\n", nmsg_len);
 					}
 
-					fprintf (stderr, "%s:%s\n", nmsg_text.id, nmsg_text.type);
-
-					nmsg_node_next = nmsg_node->next;
-					nmsg_queue_delete (&nmsg_que, nmsg_node);
-					nmsg_node = nmsg_node_next;
+					nmsg_queue_delete (&nmsg_que, &nmsg_node);
 				}
 			}
 		}
