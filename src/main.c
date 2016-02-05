@@ -19,7 +19,7 @@
 #include "kenotaphsched.h"
 #include "config.h"
 #include "pathname.h"
-#include "session_data.h"
+#include "server_data.h"
 #include "nmsg_queue.h"
 
 static const unsigned int RECONNECT_INTERVAL = 30;
@@ -73,7 +73,7 @@ main (int argc, char *argv[])
 	struct pollfd *poll_fd;
 	struct config kenotaphsched_conf;
 	struct config_server *server_iter;
-	struct session_data *server_session;
+	struct server_data *server_session;
 	struct nmsg_queue nmsg_que;
 	struct nmsg_node *nmsg_node;
 	struct nmsg_text nmsg_text;
@@ -180,7 +180,7 @@ main (int argc, char *argv[])
 	// No longer needed, free the resources
 	path_free (&path_config);
 
-	server_session = (struct session_data*) calloc (server_cnt, sizeof (struct session_data));
+	server_session = (struct server_data*) calloc (server_cnt, sizeof (struct server_data));
 
 	if ( server_session == NULL ){
 		fprintf (stderr, "%s: cannot allocate memory: %s\n", argv[0], strerror (errno));
@@ -189,7 +189,7 @@ main (int argc, char *argv[])
 	}
 
 	for ( i = 0, server_iter = kenotaphsched_conf.head; server_iter != NULL; i++, server_iter = server_iter->next ){
-		session_data_init (&(server_session[i]));
+		server_data_init (&(server_session[i]));
 
 		server_session[i].server_name = strdup (server_iter->name);
 
@@ -217,7 +217,7 @@ main (int argc, char *argv[])
 	}
 
 	// We no longer need data stored in config structure. All neccessary data
-	// were moved into session_data structure.
+	// were moved into server_data structure.
 	config_unload (&kenotaphsched_conf);
 
 	poll_len = server_cnt;
@@ -463,7 +463,7 @@ cleanup:
 
 	if ( server_session != NULL ){
 		for ( i = 0; i < server_cnt; i++ )
-			session_data_free (&(server_session[i]));
+			server_data_free (&(server_session[i]));
 		free (server_session);
 	}
 
