@@ -4,7 +4,7 @@
 #ifndef _SERVER_DATA_H
 #define _SERVER_DATA_H
 
-#include "session_event.h"
+#include "event_data.h"
 
 struct server_data
 {
@@ -12,6 +12,7 @@ struct server_data
 	char *server_name;
 	char *server_host;
 	char *server_port;
+	struct event_data *event;
 };
 
 extern void server_data_init (struct server_data *server_data);

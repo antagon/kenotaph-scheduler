@@ -64,15 +64,25 @@ server_set_port (struct config_server *server, const char *port)
 }
 
 int
-server_append_filter (struct config_server *server, struct config_filter *filter)
+server_append_event (struct config_server *server, struct config_event *event)
 {
+	struct config_event **event_iter;
+
+	event_iter = &(server->event);
+
+	while ( *event_iter != NULL ){
+		*event_iter = (*event_iter)->next;
+	}
+
+	*event_iter = event;
+
 	return 1;
 }
 
 void
 server_destroy (struct config_server *server)
 {
-	struct config_filter *filter, *filter_next;
+	struct config_event *event, *event_next;
 
 	if ( server->name != NULL )
 		free (server->name);
@@ -81,15 +91,13 @@ server_destroy (struct config_server *server)
 	if ( server->port != NULL )
 		free (server->port);
 
-	filter = server->filter;
+	event = server->event;
 
-	while ( filter != NULL ){
-		filter_next = filter->next;
-		filter_destroy (filter);
-		free (filter);
-		filter = filter_next;
+	while ( event != NULL ){
+		event_next = event->next;
+		event_destroy (event);
+		free (event);
+		event = event_next;
 	}
-
-	// XXX: memset entire structure?
 }
 

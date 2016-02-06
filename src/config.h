@@ -4,7 +4,6 @@
 #ifndef _CONFIG_H
 #define _CONFIG_H
 
-#include "config_filter.h"
 #include "config_server.h"
 
 #define CONF_ERRBUF_SIZE 256

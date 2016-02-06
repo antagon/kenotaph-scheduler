@@ -4,14 +4,14 @@
 #ifndef _CONFIG_SERVER_H
 #define _CONFIG_SERVER_H
 
-#include "config_filter.h"
+#include "config_event.h"
 
 struct config_server
 {
 	char *name;
 	char *hostname;
 	char *port;
-	struct config_filter *filter;
+	struct config_event *event;
 	struct config_server *next;
 };
 
@@ -21,7 +21,7 @@ extern int server_set_hostname (struct config_server *server, const char *hostna
 
 extern int server_set_port (struct config_server *server, const char *port);
 
-extern int server_append_filter (struct config_server *server, struct config_filter *filter);
+extern int server_append_event (struct config_server *server, struct config_event *event);
 
 extern void server_destroy (struct config_server *server);
 

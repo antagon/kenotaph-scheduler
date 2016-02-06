@@ -21,8 +21,7 @@ uninstall:
 clean:
 	rm -f *.o $(NAME)
 
-$(NAME): main.o config.o config_filter.o config_server.o server_data.o pathname.o nmsg_queue.o
-#hostport_parser.o
+$(NAME): main.o config.o config_event.o config_server.o server_data.o event_data.o pathname.o nmsg_queue.o
 	$(CC) $(CFLAGS) $^ -o $(NAME) -lconfig
 
 main.o: main.c
@@ -31,13 +30,16 @@ main.o: main.c
 config.o: config.c config.h
 	$(CC) $(CFLAGS) -c $<
 
-config_filter.o: config_filter.c config_filter.h
+config_event.o: config_event.c config_event.h
 	$(CC) $(CFLAGS) -c $<
 
 config_server.o: config_server.c config_server.h
 	$(CC) $(CFLAGS) -c $<
 
 server_data.o: server_data.c server_data.h
+	$(CC) $(CFLAGS) -c $<
+
+event_data.o: event_data.c event_data.h
 	$(CC) $(CFLAGS) -c $<
 
 pathname.o: pathname.c pathname.h
