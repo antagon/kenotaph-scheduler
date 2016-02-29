@@ -1,21 +1,50 @@
-test_server1: {
-	hostname = "localhost";
-	port = "8888";
+server test_server1
+{
+	host = "localhost"
+	port = "8888"
 
-	test_filter: {
-		on_begin = "/bin/true"; // optional
-		on_error = ""; // optional
-		on_end = "/bin/true"; // optional
-		noexec_on = (
-			[ "monday", "00:00", "08:00" ],
-			[ "monday", "19:00", "24:00" ]
-		);
+	device
+	{
+		id = { "bb_phone", "len_laptop eth0", "android_phone" }
+
+		// Execute only on monday between 12:30 - 14:50
+		action monday_prints
+		{
+			on_begin = "/bin/echo 'MONDAY ACTION BEGIN!'" // optional (ignore)
+			on_end = "/bin/echo 'MONDAY ACTION END!'" // optional (ignore)
+			on_error = "/bin/echo 'ERROR'" // optional (ignore)
+
+			limit { wday = "monday" time_from = "12:30" time_to = "14:50" }
+
+			limit { wday = "monday" time_from = "08:45" time_to = "9:40" }
+
+			limit { wday = "monday" time_from = "9:00" time_to = "9:55" }
+		}
+
+		// Execute everytime the event is received
+		action alltime_prints
+		{
+			on_begin = "/bin/echo 'ALLTIME ACTION BEGIN'" // optional (ignore)
+			on_end = "/bin/echo 'ALLTIME ACTION END'" // optional (ignore)
+			on_error = "/bin/echo 'ALLTIME ACTION ERROR'" // optional (ignore)
+		}
 	}
 }
 
-test_server2: {
-	hostname = "localhost";
-	port = "9999";
-}
+server test_server2
+{
+	host = "localhost"
+	port = "9999"
 
+	device
+	{
+		id = { "test_device" }
+
+		action print_stuff
+		{
+			on_begin = "/bin/echo 'test_device found...'"
+			on_end = "/bin/echo 'test_device gone...'"
+		}
+	}
+}
 

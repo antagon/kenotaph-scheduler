@@ -5,7 +5,7 @@
 CC = gcc
 CFLAGS = -std=gnu99 -O2 -pedantic -Wall -ggdb
 
-NAME = kenotaphsched
+NAME = kenotaph-sched
 INSTALL_DIR = /usr/local/sbin
 
 .PHONY: clean install
@@ -21,19 +21,13 @@ uninstall:
 clean:
 	rm -f *.o $(NAME)
 
-$(NAME): main.o config.o config_event.o config_server.o server_data.o event_data.o pathname.o nmsg_queue.o
-	$(CC) $(CFLAGS) $^ -o $(NAME) -lconfig
+$(NAME): main.o config.o server_data.o event_data.o pathname.o nmsg_queue.o
+	$(CC) $(CFLAGS) $^ -o $(NAME) -lconfuse
 
 main.o: main.c
 	$(CC) $(CFLAGS) -c $<
 
 config.o: config.c config.h
-	$(CC) $(CFLAGS) -c $<
-
-config_event.o: config_event.c config_event.h
-	$(CC) $(CFLAGS) -c $<
-
-config_server.o: config_server.c config_server.h
 	$(CC) $(CFLAGS) -c $<
 
 server_data.o: server_data.c server_data.h

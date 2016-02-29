@@ -1,217 +1,420 @@
-/*
- * Copyright (c) 2016, CodeWard.org
- */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <libconfig.h>
+#include <errno.h>
+#include <confuse.h>
 
 #include "config.h"
 
-int
-config_load (struct config *conf, const char *filename, char *errbuf)
+static cfg_opt_t limit_opts[] = {
+	CFG_STR ("wday", NULL, CFGF_NODEFAULT),
+	CFG_STR ("time_from", NULL, CFGF_NODEFAULT),
+	CFG_STR ("time_to", NULL, CFGF_NODEFAULT),
+	CFG_END ()
+};
+
+static cfg_opt_t action_opts[] = {
+	CFG_STR ("on_begin", NULL, CFGF_NODEFAULT),
+	CFG_STR ("on_end", NULL, CFGF_NODEFAULT),
+	CFG_STR ("on_error", NULL, CFGF_NODEFAULT),
+	CFG_SEC ("limit", limit_opts, CFGF_MULTI),
+	CFG_END ()
+};
+
+static cfg_opt_t device_opts[] = {
+	CFG_STR_LIST ("id", NULL, CFGF_NODEFAULT),
+	CFG_SEC ("action", action_opts, CFGF_TITLE | CFGF_MULTI | CFGF_NO_TITLE_DUPES),
+	CFG_END ()
+};
+
+static cfg_opt_t server_opts[] = {
+	CFG_STR ("name", NULL, CFGF_NODEFAULT),
+	CFG_STR ("host", NULL, CFGF_NODEFAULT),
+	CFG_STR ("port", NULL, CFGF_NODEFAULT),
+	CFG_SEC ("device", device_opts, CFGF_MULTI),
+	CFG_END ()
+};
+
+static cfg_opt_t conf_opts[] = {
+	CFG_SEC ("server", server_opts, CFGF_TITLE | CFGF_MULTI | CFGF_NO_TITLE_DUPES),
+	CFG_END ()
+};
+
+static int
+cfg_validate_server (cfg_t *cfg, cfg_opt_t *opt)
 {
-	config_t libconfig;
-	config_setting_t *root_setting;
-	config_setting_t *server_setting;
-	config_setting_t *server_setting_elem;
-	struct config_server *server;
-	struct config_event *event;
-	const char *str_val;
-	int i, j, server_cnt, option_cnt, int_val, error;
+	cfg_t *serv;
 
-	error = 0;
-	server = NULL;
+	serv = cfg_opt_getnsec (opt, cfg_opt_size (opt) - 1);
 
-	config_init (&libconfig);
-
-	if ( config_read_file (&libconfig, filename) == CONFIG_FALSE ){
-		snprintf (errbuf, CONF_ERRBUF_SIZE, "%s on line %d", config_error_text (&libconfig), config_error_line (&libconfig));
-		error = 1;
-		goto cleanup;
+	if ( cfg_size (serv, "host") == 0 ){
+		cfg_error (cfg, "undefined option 'host'");
+		return -1;
 	}
 
-	root_setting = config_root_setting (&libconfig);
-	server_cnt = config_setting_length (root_setting);
+	if ( cfg_size (serv, "port") == 0 ){
+		cfg_error (cfg, "undefined option 'port'");
+		return -1;
+	}
 
-	memset (errbuf, 0, sizeof (CONF_ERRBUF_SIZE));
+	return 0;
+}
 
-	for ( i = 0; i < server_cnt; i++ ){
-		server = (struct config_server*) calloc (1, sizeof (struct config_server));
+static int
+cfg_validate_device (cfg_t *cfg, cfg_opt_t *opt)
+{
+	cfg_t *dev;
 
-		if ( server == NULL ){
-			snprintf (errbuf, CONF_ERRBUF_SIZE, "cannot allocate memory");
-			error = 1;
+	dev = cfg_opt_getnsec (opt, cfg_opt_size (opt) - 1);
+
+	if ( cfg_size (dev, "id") == 0 ){
+		cfg_error (cfg, "undefined option 'id'");
+		return -1;
+	}
+
+	return 0;
+}
+
+static void
+config_limit_free (struct config_limit *conf_limit)
+{
+	if ( conf_limit->wday != NULL )
+		free (conf_limit->wday);
+	if ( conf_limit->time_from != NULL )
+		free (conf_limit->time_from);
+	if ( conf_limit->time_to != NULL )
+		free (conf_limit->time_to);
+}
+
+static void
+config_action_free (struct config_action *conf_action)
+{
+	struct config_limit *limit, *limit_next;
+
+	if ( conf_action->on_begin != NULL )
+		free (conf_action->on_begin);
+	if ( conf_action->on_end != NULL )
+		free (conf_action->on_end);
+	if ( conf_action->on_error != NULL )
+		free (conf_action->on_error);
+
+	for ( limit = conf_action->limit; limit != NULL; ){
+		limit_next = limit->next;
+		config_limit_free (limit);
+		free (limit);
+		limit = limit_next;
+	}
+}
+
+static void
+config_device_free (struct config_device *conf_dev)
+{
+	struct config_action *action, *action_next;
+	int i;
+
+	i = 0;
+
+	while ( conf_dev->id[i] != NULL )
+		free (conf_dev->id[i++]);
+
+	free (conf_dev->id);
+
+	for ( action = conf_dev->action; action != NULL; ){
+		action_next = action->next;
+		config_action_free (action);
+		free (action);
+		action = action_next;
+	}
+}
+
+static void
+config_server_free (struct config_server *conf_serv)
+{
+	struct config_device *dev, *dev_next;
+
+	if ( conf_serv->name != NULL )
+		free (conf_serv->name);
+	if ( conf_serv->host != NULL )
+		free (conf_serv->host);
+	if ( conf_serv->port != NULL )
+		free (conf_serv->port);
+
+	for ( dev = conf_serv->dev; dev != NULL; ){
+		dev_next = dev->next;
+		config_device_free (dev);
+		free (dev);
+		dev = dev_next;
+	}
+}
+
+int
+config_load (struct config *conf, const char *filename, unsigned long *server_cnt)
+{
+	cfg_t *cfg, *cfg_serv, *cfg_dev, *cfg_action, *cfg_limit;
+	struct config_server *conf_server;
+	struct config_device *conf_dev, **conf_dev_tail;
+	struct config_action *conf_action, **conf_action_tail;
+	struct config_limit *conf_limit, **conf_limit_tail;
+	unsigned long id_cnt;
+	char *str_val;
+	int serv_idx, dev_idx, devid_idx, action_idx, limit_idx, exitno;
+
+	if ( server_cnt != NULL )
+		*server_cnt = 0;
+
+	conf_server = NULL;
+	conf_dev = NULL;
+	conf_action = NULL;
+	conf_limit = NULL;
+
+	cfg = cfg_init (conf_opts, CFGF_NONE);
+
+	cfg_set_validate_func (cfg, "server", cfg_validate_server);
+	cfg_set_validate_func (cfg, "server|device", cfg_validate_device);
+
+	exitno = cfg_parse (cfg, filename);
+
+	switch ( exitno ){
+		case CFG_FILE_ERROR:
+			goto cleanup;
+
+		case CFG_PARSE_ERROR:
+			goto cleanup;
+	}
+
+	//
+	// Process server section
+	//
+	for ( serv_idx = 0; serv_idx < cfg_size (cfg, "server"); serv_idx++ ){
+		cfg_serv = cfg_getnsec (cfg, "server", serv_idx);
+
+		conf_server = (struct config_server*) calloc (1, sizeof (struct config_server));
+
+		if ( conf_server == NULL ){
+			exitno = CFG_FILE_ERROR;
 			goto cleanup;
 		}
 
-		server_setting = config_setting_get_elem (root_setting, i);
+		conf_server->name = strdup (cfg_title (cfg_serv));
 
-		if ( server_setting == NULL ){
-			snprintf (errbuf, CONF_ERRBUF_SIZE, "cannot get a server definition");
-			error = 1;
+		if ( conf_server->name == NULL ){
+			exitno = CFG_FILE_ERROR;
 			goto cleanup;
 		}
 
-		str_val = config_setting_name (server_setting);
+		conf_server->host = strdup (cfg_getstr (cfg_serv, "host"));
 
-		if ( str_val == NULL ){
-			snprintf (errbuf, CONF_ERRBUF_SIZE, "server definition %d, has no name", i + 1);
-			error = 1;
+		if ( conf_server->host == NULL ){
+			exitno = CFG_FILE_ERROR;
 			goto cleanup;
 		}
 
-		server_set_name (server, str_val);
+		conf_server->port = strdup (cfg_getstr (cfg_serv, "port"));
 
-		option_cnt = config_setting_length (server_setting);
-
-		for ( j = 0; j < option_cnt; j++ ){
-			server_setting_elem = config_setting_get_elem (server_setting, j);
-
-			if ( server_setting_elem == NULL ){
-				snprintf (errbuf, CONF_ERRBUF_SIZE, "cannot get an option inside a server definition");
-				error = 1;
-				goto cleanup;
-			}
-
-			str_val = config_setting_name (server_setting_elem);
-
-			if ( str_val == NULL ){
-				snprintf (errbuf, CONF_ERRBUF_SIZE, "server '%s', missing name for an event rule", server->name);
-				error = 1;
-				goto cleanup;
-			}
-
-			if ( strlen (str_val) > CONF_EVENT_NAME_MAXLEN ){
-				snprintf (errbuf, CONF_ERRBUF_SIZE, "event rule %d, name too long", i + 1);
-				error = 1;
-				goto cleanup;
-			}
-
-			int_val = config_setting_type (server_setting_elem);
-
-			if ( (int_val == CONFIG_TYPE_STRING) && (strcmp (str_val, "hostname") == 0) ){
-				str_val = config_setting_get_string (server_setting_elem);
-				server_set_hostname (server, str_val);
-				continue;
-
-			} else if ( (int_val == CONFIG_TYPE_STRING) && (strcmp (str_val, "port") == 0) ){
-				str_val = config_setting_get_string (server_setting_elem);
-				server_set_port (server, str_val);
-				continue;
-
-			} else if ( (int_val != CONFIG_TYPE_GROUP) && (int_val != CONFIG_TYPE_LIST) ){
-				snprintf (errbuf, CONF_ERRBUF_SIZE, "server '%s', event rule '%s' is not a list or a group", server->name, str_val);
-				error = 1;
-				goto cleanup;
-			}
-
-			event = (struct config_event*) calloc (1, sizeof (struct config_event));
-
-			if ( event == NULL ){
-				snprintf (errbuf, CONF_ERRBUF_SIZE, "cannot allocate memory");
-				error = 1;
-				goto cleanup;
-			}
-
-			event_set_name (event, str_val);
-
-			if ( int_val == CONFIG_TYPE_GROUP ){
-
-				if ( config_setting_lookup_string (server_setting_elem, "event_begin", &str_val) == CONFIG_FALSE ){
-					str_val = NULL;
-				}
-
-				event_set_onbegin (event, str_val);
-
-				if ( config_setting_lookup_string (server_setting_elem, "event_end", &str_val) == CONFIG_FALSE ){
-					str_val = NULL;
-				}
-
-				event_set_onend (event, str_val);
-
-				if ( config_setting_lookup_string (server_setting_elem, "event_error", &str_val) == CONFIG_FALSE ){
-					str_val = NULL;
-				}
-
-				event_set_onerror (event, str_val);
-
-				if ( config_setting_lookup_string (server_setting_elem, "wday", &str_val) == CONFIG_FALSE ){
-					str_val = NULL;
-				}
-
-				event_set_wday (event, str_val);
-
-				if ( config_setting_lookup_string (server_setting_elem, "time_begin", &str_val) == CONFIG_FALSE ){
-					str_val = NULL;
-				}
-
-				event_set_timebegin (event, str_val);
-
-				if ( config_setting_lookup_string (server_setting_elem, "time_end", &str_val) == CONFIG_FALSE ){
-					str_val = NULL;
-				}
-
-				event_set_timeend (event, str_val);
-			}
-
-			server_append_event (server, event);
-		}
-
-		if ( server->hostname == NULL ){
-			snprintf (errbuf, CONF_ERRBUF_SIZE, "server '%s', cannot obtain value of an option 'hostname'", server->name);
-			error = 1;
+		if ( conf_server->port == NULL ){
+			exitno = CFG_FILE_ERROR;
 			goto cleanup;
 		}
 
-		if ( server->port == NULL ){
-			snprintf (errbuf, CONF_ERRBUF_SIZE, "server '%s', cannot obtain value of an option 'port'", server->name);
-			error = 1;
-			goto cleanup;
+		conf_dev_tail = &(conf_server->dev);
+
+		//
+		// Process server|device section
+		//
+		for ( dev_idx = 0; dev_idx < cfg_size (cfg_serv, "device"); dev_idx++ ){
+			cfg_dev = cfg_getnsec (cfg_serv, "device", dev_idx);
+
+			conf_dev = (struct config_device*) calloc (1, sizeof (struct config_device));
+
+			if ( conf_dev == NULL ){
+				exitno = CFG_FILE_ERROR;
+				goto cleanup;
+			}
+
+			id_cnt = cfg_size (cfg_dev, "id");
+
+			conf_dev->id = (char**) calloc (id_cnt + 1, sizeof (char*));
+
+			if ( conf_dev->id == NULL ){
+				exitno = CFG_FILE_ERROR;
+				goto cleanup;
+			}
+
+			//
+			// Process server|device|id list
+			//
+			for ( devid_idx = 0; devid_idx < cfg_size (cfg_dev, "id"); devid_idx++ ){
+				conf_dev->id[devid_idx] = strdup (cfg_getnstr (cfg_dev, "id", devid_idx));
+
+				if ( conf_dev->id[devid_idx] == NULL ){
+					exitno = CFG_FILE_ERROR;
+					goto cleanup;
+				}
+			}
+
+			conf_action_tail = &(conf_dev->action);
+
+			//
+			// Process server|device|action section
+			//
+			for ( action_idx = 0; action_idx < cfg_size (cfg_dev, "action"); action_idx++ ){
+				cfg_action = cfg_getnsec (cfg_dev, "action", action_idx);
+
+				conf_action = (struct config_action*) calloc (1, sizeof (struct config_action));
+
+				if ( conf_action == NULL ){
+					exitno = CFG_FILE_ERROR;
+					goto cleanup;
+				}
+
+				str_val = cfg_getstr (cfg_action, "on_begin");
+
+				if ( str_val != NULL ){
+					conf_action->on_begin = strdup (str_val);
+
+					if ( conf_action->on_begin == NULL ){
+						exitno = CFG_FILE_ERROR;
+						goto cleanup;
+					}
+				}
+
+				str_val = cfg_getstr (cfg_action, "on_end");
+
+				if ( str_val != NULL ){
+					conf_action->on_end = strdup (str_val);
+
+					if ( conf_action->on_end == NULL ){
+						exitno = CFG_FILE_ERROR;
+						goto cleanup;
+					}
+				}
+
+				str_val = cfg_getstr (cfg_action, "on_error");
+
+				if ( str_val != NULL ){
+					conf_action->on_error = strdup (str_val);
+
+					if ( conf_action->on_error == NULL ){
+						exitno = CFG_FILE_ERROR;
+						goto cleanup;
+					}
+				}
+
+				conf_limit_tail = &(conf_action->limit);
+
+				// Process server|device|action|limit
+				for ( limit_idx = 0; limit_idx < cfg_size (cfg_action, "limit"); limit_idx++ ){
+					cfg_limit = cfg_getnsec (cfg_action, "limit", limit_idx);
+
+					conf_limit = (struct config_limit*) calloc (1, sizeof (struct config_limit));
+
+					if ( conf_limit == NULL ){
+						exitno = CFG_FILE_ERROR;
+						goto cleanup;
+					}
+
+					str_val = cfg_getstr (cfg_limit, "wday");
+
+					if ( str_val != NULL ){
+						conf_limit->wday = strdup (str_val);
+
+						if ( conf_limit->wday == NULL ){
+							exitno = CFG_FILE_ERROR;
+							goto cleanup;
+						}
+					}
+
+					str_val = cfg_getstr (cfg_limit, "time_from");
+
+					if ( str_val != NULL ){
+						conf_limit->time_from = strdup (str_val);
+
+						if ( conf_limit->time_from == NULL ){
+							exitno = CFG_FILE_ERROR;
+							goto cleanup;
+						}
+					}
+
+					str_val = cfg_getstr (cfg_limit, "time_to");
+
+					if ( str_val != NULL ){
+						conf_limit->time_to = strdup (str_val);
+
+						if ( conf_limit->time_to == NULL ){
+							exitno = CFG_FILE_ERROR;
+							goto cleanup;
+						}
+					}
+
+					*conf_limit_tail = conf_limit;
+					conf_limit_tail = &((*conf_limit_tail)->next);
+				}
+
+				*conf_action_tail = conf_action;
+				conf_action_tail = &((*conf_action_tail)->next);
+			}
+
+			*conf_dev_tail = conf_dev;
+			conf_dev_tail = &((*conf_dev_tail)->next);
 		}
+
+		if ( server_cnt != NULL )
+			(*server_cnt)++;
 
 		if ( conf->head == NULL ){
-			conf->head = server;
+			conf->head = conf_server;
 			conf->tail = conf->head;
 		} else {
-			conf->tail->next = server;
-			conf->tail = server;
+			conf->tail->next = conf_server;
+			conf->tail = conf_server;
 		}
-
-		server = NULL;
 	}
+
+	// Set to null so we do not remove the last added node.
+	conf_server = NULL;
+	conf_dev = NULL;
+	conf_action = NULL;
+	conf_limit = NULL;
 
 cleanup:
-	if ( error ){
-		if ( server != NULL ){
-			server_destroy (server);
-			free (server);
-		}
-
-		config_unload (conf);
-		server_cnt = -1;
+	if ( conf_server != NULL ){
+		config_server_free (conf_server);
+		free (conf_server);
 	}
 
-	config_destroy (&libconfig); // destroy libconfig object
+	if ( conf_dev != NULL ){
+		config_device_free (conf_dev);
+		free (conf_dev);
+	}
 
-	return server_cnt;
+	if ( conf_action != NULL ){
+		config_action_free (conf_action);
+		free (conf_action);
+	}
+
+	if ( conf_limit != NULL ){
+		config_limit_free (conf_limit);
+		free (conf_limit);
+	}
+
+	cfg_free (cfg);
+
+	return exitno;
 }
 
 void
 config_unload (struct config *conf)
 {
-	struct config_server *server, *server_next;
+	struct config_server *conf_server, *conf_server_next;
 
-	server = conf->head;
-
-	while ( server != NULL ){
-		server_next = server->next;
-		server_destroy (server);
-		free (server);
-		server = server_next;
+	for ( conf_server = conf->head; conf_server != NULL; ){
+		conf_server_next = conf_server->next;
+		config_server_free (conf_server);
+		free (conf_server);
+		conf_server = conf_server_next;
 	}
 
 	conf->head = NULL;
-	conf->tail = conf->head;
+	conf->tail = NULL;
 }
 

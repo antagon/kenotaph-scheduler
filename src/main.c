@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <getopt.h>
 #include <poll.h>
+#include <confuse.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -38,7 +39,7 @@ static int exitno;
 static void
 kenotaphsched_help (const char *p)
 {
-	fprintf (stdout, "Usage: %s [OPTIONS] <FILE>\n\n"
+	fprintf (stdout, "Usage: %s [OPTIONS] <config-file>\n\n"
 					 "Options:\n"
 					 "  -d, --daemon              run as a daemon\n"
 					 "  -h, --help                show this usage information\n"
@@ -72,18 +73,21 @@ main (int argc, char *argv[])
 	pid_t pid;
 	struct pollfd *poll_fd;
 	struct config kenotaphsched_conf;
-	struct config_server *server_iter;
 	struct server_data *server_session;
+	struct config_server *server_iter;
 	struct nmsg_queue nmsg_que;
 	struct nmsg_node *nmsg_node;
 	struct nmsg_text nmsg_text;
 	struct pathname path_config;
 	struct option_data opt;
-	char conf_errbuff[CONF_ERRBUF_SIZE];
+	//char conf_errbuff[CONF_ERRBUF_SIZE];
+	char nmsg_buff[8192];
+	ssize_t nmsg_len;
 	struct sigaction sa;
 	struct addrinfo addr_hint;
 	socklen_t opt_len;
-	int i, c, opt_index, opt_val, rval, server_cnt, syslog_flags, poll_len;
+	unsigned long server_cnt;
+	int i, c, opt_index, opt_val, rval, syslog_flags, poll_len;
 	struct itimerval timer;
 	struct option opt_long[] = {
 		{ "daemon", no_argument, NULL, 'd' },
@@ -165,14 +169,21 @@ main (int argc, char *argv[])
 	//
 	// Load configuration file
 	//
-	server_cnt = config_load (&kenotaphsched_conf, path_config.base, conf_errbuff);
+	rval = config_load (&kenotaphsched_conf, path_config.base, &server_cnt);
 
-	if ( server_cnt == -1 ){
-		fprintf (stderr, "%s: cannot load a configuration file '%s': %s\n", argv[0], argv[optind], conf_errbuff);
-		exitno = EXIT_FAILURE;
-		goto cleanup;
-	} else if ( server_cnt == 0 ){
-		fprintf (stderr, "%s: nothing to do, no servers defined.\n", argv[0]);
+	switch ( rval ){
+		case CFG_FILE_ERROR:
+			fprintf (stderr, "%s: cannot load a configuration file '%s': %s\n", argv[0], argv[optind], strerror (errno));
+			exitno = EXIT_FAILURE;
+			goto cleanup;
+
+		case CFG_PARSE_ERROR:
+			exitno = EXIT_FAILURE;
+			goto cleanup;
+	}
+
+	if ( server_cnt == 0 ){
+		fprintf (stderr, "%s: no servers defined, nothing to do...\n", argv[0]);
 		exitno = EXIT_FAILURE;
 		goto cleanup;
 	}
@@ -199,7 +210,7 @@ main (int argc, char *argv[])
 			goto cleanup;
 		}
 
-		server_session[i].server_host = strdup (server_iter->hostname);
+		server_session[i].server_host = strdup (server_iter->host);
 
 		if ( server_session[i].server_host == NULL ){
 			fprintf (stderr, "%s: cannot allocate memory: %s\n", argv[0], strerror (errno));
@@ -214,6 +225,8 @@ main (int argc, char *argv[])
 			exitno = EXIT_FAILURE;
 			goto cleanup;
 		}
+
+		// TODO: Pass data to lua state
 	}
 
 	// We no longer need data stored in config structure. All neccessary data
@@ -269,7 +282,7 @@ main (int argc, char *argv[])
 	//
 	// Daemonize the process if the flag was set
 	//
-	if ( opt.daemon == 1 ){
+	/*if ( opt.daemon == 1 ){
 		pid = fork ();
 
 		if ( pid > 0 ){
@@ -293,7 +306,7 @@ main (int argc, char *argv[])
 		freopen ("/dev/null", "w", stdout);
 		freopen ("/dev/null", "w", stderr);
 		syslog_flags = LOG_PID;
-	}
+	}*/
 
 	openlog ("kenotaphsched", syslog_flags, LOG_DAEMON);
 
@@ -408,9 +421,6 @@ main (int argc, char *argv[])
 
 			// Handle incoming data (event).
 			if ( poll_fd[i].revents & POLLIN ){
-				char nmsg_buff[8192];
-				ssize_t nmsg_len;
-
 				errno = 0;
 				nmsg_len = recv (server_session[i].fd, nmsg_buff, sizeof (nmsg_buff), MSG_DONTWAIT);
 
@@ -431,27 +441,27 @@ main (int argc, char *argv[])
 					exitno = EXIT_FAILURE;
 					goto cleanup;
 				}
+			}
 
-				nmsg_node = nmsg_que.head;
+			nmsg_node = nmsg_que.head;
 
-				while ( nmsg_node != NULL ){
-					rval = nmsg_node_text (nmsg_node, &nmsg_text);
+			while ( nmsg_node != NULL ){
+				rval = nmsg_node_text (nmsg_node, &nmsg_text);
 
-					if ( rval == NMSG_ECON ){
-						fprintf (stderr, "%lu B [!!! incomplete message !!!]\n", nmsg_len);
-						nmsg_node = nmsg_node->next;
-						continue;
-					} else if ( rval == NMSG_ESYN ){
-						fprintf (stderr, "%lu B [!!! syntax error !!!]\n", nmsg_len);
-					} else if ( rval == NMSG_ECHR ){
-						fprintf (stderr, "%lu B [!!! characters error !!!]\n", nmsg_len);
-					} else {
-						fprintf (stderr, "%s:%s\n", nmsg_text.id, nmsg_text.type);
-						//fprintf (stderr, "%lu B [ complete message ]\n", nmsg_len);
-					}
-
-					nmsg_queue_delete (&nmsg_que, &nmsg_node);
+				if ( rval == NMSG_ECON ){
+					fprintf (stderr, "[!!! incomplete message !!!]\n");
+					nmsg_node = nmsg_node->next;
+					continue;
+				} else if ( rval == NMSG_ESYN ){
+					fprintf (stderr, "[!!! syntax error !!!]\n");
+				} else if ( rval == NMSG_ECHR ){
+					fprintf (stderr, "[!!! characters error !!!]\n");
+				} else {
+					fprintf (stderr, "%s:%s\n", nmsg_text.id, nmsg_text.type);
+					//fprintf (stderr, "%lu B [ complete message ]\n", nmsg_len);
 				}
+
+				nmsg_queue_delete (&nmsg_que, &nmsg_node);
 			}
 		}
 	}
