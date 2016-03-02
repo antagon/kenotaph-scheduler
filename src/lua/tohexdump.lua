@@ -41,7 +41,7 @@ if fdout == nil then
 	goto exit
 end
 
-fdout:write (string.format ("const char %s[] = \"%s\";\nunsigned long int %s_len = %d\n", varname, hexstr, varname, hexstr_len))
+fdout:write (string.format ("const char %s[] = \"%s\";\nunsigned long int %s_len = %d;\n", varname, hexstr, varname, hexstr_len))
 
 ::exit::
 if fdin ~= nil then
