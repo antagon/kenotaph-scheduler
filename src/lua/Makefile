@@ -1,10 +1,10 @@
 .PHONY: clean
 
-all: main.lua.bin
+all: main.lua.h
 
-main.lua.bin: main.lua
-	luac -s -o $@ $< 
+main.lua.h: main.lua
+	lua bin2h.lua +main.lua > $@
 
 clean:
-	rm -f main.lua.bin
+	rm -f main.lua.h
 
